@@ -7,19 +7,16 @@ from Queue import Empty
 import logging
 import time
 from django.conf import settings
-from sentry.client.handlers import SentryHandler
 from datetime import datetime, timedelta
 import atp_env
 import client
 from models import Job
 import jobs
-from shared.autometrics.ingraphs_metric import increment_metric
-from shared.autometrics import constants
 import sys
 import simplejson
 from shared.simple_encoder import SimpleEncoder
 from shared import stack_util
-from atp import rescheduler
+import rescheduler
 
 class WorkerProc(multiprocessing.Process):
     def __init__(self, worker_id, atp_id, executor, worker_type, user_queue, background_queue, report_queue, env):
@@ -34,11 +31,6 @@ class WorkerProc(multiprocessing.Process):
         self.executor = executor
         self.taskcount = 0
         self.worker_logger = logging.getLogger("worker_%s" % self.worker_id)
-        if SentryHandler not in map(lambda x: x.__class__, self.worker_logger.handlers):
-            self.worker_logger.addHandler(SentryHandler())
-        if settings.ENABLE_STACK_TRACE == True:
-            stack_util.register_stack_listener()
-
 
     def try_get_work(self, queue, block, timeout):
         try:
@@ -83,7 +75,6 @@ class WorkerProc(multiprocessing.Process):
                 except Exception as mailex:
                     logging.error("Failed to send error admin email : %s" % str(mailex))
 
-                increment_metric(constants.ATP_WORKER_EXIT_ON_IOERROR_COUNT)
                 #record exception details to django-sentry
                 self.worker_logger.error(str(ex), exc_info=exc_info, extra={})
                 self._report_exit()
@@ -111,7 +102,6 @@ class WorkerProc(multiprocessing.Process):
             # Report that this worker is busy
             self._report_status("busy")
             self._report_task_start(task)
-            increment_metric(constants.ATP_TASK_PROCESSED_COUNT)
             new_eta, err_msg, result = self._do_task(task)
 
             if err_msg != None:
@@ -120,7 +110,6 @@ class WorkerProc(multiprocessing.Process):
             else:
                 result_json = simplejson.dumps(result, cls=SimpleEncoder)
                 logging.info("%s done task %s taking %s sec, taskcount:%s, result:%s" % (self, task, (time.time()- start_time), self.taskcount, result_json))
-            increment_metric(constants.ATP_TASK_PROCESS_ELAPSE, time.time() - start_time)
         except Exception as ex:
             subject = "%s encounters error when processing task %s." % (self, task)
             message = "%s got %s when processing task %s: %s" % (self, ex, task, traceback.format_exc())
@@ -133,7 +122,6 @@ class WorkerProc(multiprocessing.Process):
                 mail_admins(subject, message, fail_silently=False)
             except Exception as mailex:
                 logging.error("Failed to send error admin email : %s" % str(mailex))
-            increment_metric(constants.ATP_TASK_FAILURE_COUNT)
             self.worker_logger.error(str(ex), exc_info=exc_info, extra={"job_id": task.job_id, "entity_id": task.entity_id})
             result = {"status":"error", "error_message":err_msg}
             self.log_failed_task(task, message)
@@ -196,7 +184,6 @@ class WorkerProc(multiprocessing.Process):
                 if task.eta:
                     wait_time_delta = timezone.now() - task.eta
                     wait_time_milliseconds = (wait_time_delta.microseconds + (wait_time_delta.seconds + wait_time_delta.days * 24 * 3600) * 10**6) / 10**3
-                    increment_metric(constants.ATP_TASK_QUEUE_WAIT_TIME, wait_time_milliseconds)
                 if not client.should_process_profile_id(task.entity_id):
                     result = {"status": "success", "status_details": "Skipped based on settings configuration."}
                 elif self._has_colliding_execution(task):
@@ -230,7 +217,6 @@ class WorkerProc(multiprocessing.Process):
                         mail_admins(subject, message, fail_silently=False)
                     except Exception as mailex:
                         logging.error("Failed to send error admin email : %s" % str(mailex))
-                    increment_metric(constants.ATP_TASK_FAILURE_COUNT)
                     result = {"status":"error"}
                     error_msg = "Task execution failed %s attempts with exception: %s" % (settings.ATP_TASK_RETRY_ATTEMPTS, ex)
                     done = True

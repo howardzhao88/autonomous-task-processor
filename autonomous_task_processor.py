@@ -38,21 +38,15 @@ from django.conf import settings
 from worker_proc import WorkerProc
 from models import Job
 import atpstats
-from feeder_thread import FeederThread
+from task_manager import TaskManager
 import sys
 import atp_env
-from third_party import daemon
+from shared import daemon
 import signal
 import datetime
-import mock.mock_service
 import executor
 from models import Task
 from admin_server import AdminThread
-
-#HACK: since not loading whole django environment,
-#need to call this to ensure template tags are available for tasks
-from django import template
-template.add_to_builtins("contacts.templatetags.contacts_extras")
 
 class AutonomousTaskProcessor():
     def __init__(self):
@@ -76,17 +70,14 @@ class AutonomousTaskProcessor():
 
     def run(self):
         logging.info("started atp")
-        if settings.ENABLE_ATP == False:
-            logging.warn("settings.ENABLE_ATP is False. ATP will not process any tasks.")
+        if hasattr(settings, "ATP_ENABLED_PROFILE_ID_LIST") and len(settings.ATP_ENABLED_PROFILE_ID_LIST) > 0:
+            plist = ",".join(map(str,settings.ATP_ENABLED_PROFILE_ID_LIST))
+            log_msg = "ATP is enabled only for profile_ids [%s]" % plist
+            if hasattr(settings, "ATP_ENABLED_PROFILE_ID_START"):
+                log_msg += " and all profile id above and including %s." % settings.ATP_ENABLED_PROFILE_ID_START
+            logging.info(log_msg)
         else:
-            if hasattr(settings, "ATP_ENABLED_PROFILE_ID_LIST") and len(settings.ATP_ENABLED_PROFILE_ID_LIST) > 0:
-                plist = ",".join(map(str,settings.ATP_ENABLED_PROFILE_ID_LIST))
-                log_msg = "ATP is enabled only for profile_ids [%s]" % plist
-                if hasattr(settings, "ATP_ENABLED_PROFILE_ID_START"):
-                    log_msg += " and all profile id above and including %s." % settings.ATP_ENABLED_PROFILE_ID_START
-                logging.info(log_msg)
-            else:
-                logging.info("ATP is enabled for all users")
+            logging.info("ATP is enabled for all users")
         self.admin_thread = AdminThread(self)
         self.admin_thread.start()
         self.executor = executor
@@ -94,7 +85,7 @@ class AutonomousTaskProcessor():
         self.stats = atpstats.ATPStats(self.atp_id)
         self.add_workers(atp_env.WORKER_TYPE_USER, settings.ATP_USER_QUEUE_THREAD_COUNT)
         self.add_workers(atp_env.WORKER_TYPE_BACKGROUND, settings.ATP_BACKGROUND_QUEUE_THREAD_COUNT)
-        self.feeder = FeederThread(self, settings.ATP_USER_QUEUE_THREAD_COUNT, settings.ATP_BACKGROUND_QUEUE_THREAD_COUNT)
+        self.feeder = TaskManager(self, settings.ATP_USER_QUEUE_THREAD_COUNT, settings.ATP_BACKGROUND_QUEUE_THREAD_COUNT)
         self.feeder.start()
         self.main_loop()
 
@@ -220,7 +211,6 @@ def init():
         root_logger = logging.getLogger()
         root_logger.addHandler(rotating_handler)
         root_logger.setLevel(logging.INFO)
-
 atp = None
 def signal_handler(sig, frame):
     print "Got interrupt signal, start shutdown sequence which may take several seconds."
@@ -228,7 +218,7 @@ def signal_handler(sig, frame):
 
 def start():
     init()
-    if settings.ATP_DAEMON_MODE and not settings.DEBUG:
+    if settings.ATP_DAEMON_MODE:
         daemon.daemonize(stdout=settings.ATP_LOG_FILE, stderr=settings.ATP_ERROR_FILE)
     signal.signal(signal.SIGINT, signal_handler)
     global atp

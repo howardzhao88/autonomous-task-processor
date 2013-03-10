@@ -2,9 +2,9 @@ from httplib import HTTPConnection
 import time
 import simplejson
 from django.conf import settings
-from atp import admin_server, client
+import admin_server, client
 from django.test import TestCase
-from atp.test.testing import with_atp, wait_atp_complete_task
+from test.testing import with_atp, wait_atp_complete_task
 from nose.plugins.attrib import attr
 from django.utils import timezone
 import urllib

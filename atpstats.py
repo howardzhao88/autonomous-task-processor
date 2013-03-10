@@ -1,10 +1,10 @@
 from django.conf import settings
 from threading import RLock
 import time
-from atp import atp_env, task_status
+import atp_env, task_status
 import copy
 from django.core.cache import cache
-from atp import constants as atp_constants
+import constants as atp_constants
 from django.utils import timezone
 import pytz
 

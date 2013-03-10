@@ -5,15 +5,12 @@ import time
 from django.conf import settings
 from django.utils import timezone
 from models import Task
-import traceback
 import math
 import atp_env
-from shared.autometrics.ingraphs_metric import increment_metric
-from shared.autometrics import constants
 from threading import RLock
-from atp import client
+import client
 
-class FeederThread(threading.Thread):
+class TaskManager(threading.Thread):
     def __init__(self, atp, user_worker_count, background_worker_count):
         threading.Thread.__init__(self, name="ATP:%s-Feeder" % atp.atp_id)
         self.atp = atp
@@ -102,7 +99,6 @@ class FeederThread(threading.Thread):
             worker = self.atp.workers[id]
             if worker and not worker.is_alive():
                 logging.error("ATP monitor found %s has terminated, start replacement." % worker)
-                increment_metric(constants.ATP_WORKER_UNEXPECTED_EXIT_COUNT)
                 self.handle_worker_exit(worker.worker_type, worker.worker_id)
 
     def shutdown(self):
@@ -238,8 +234,6 @@ class FeederThread(threading.Thread):
 
         # elapse in ms
         self.atp.stats.report_task_get((time.time()- start_time) * 1000, user_task_count, background_task_count, user_collision_count + background_collision_count)
-        #increment_metric(atp_env.AUTOMETRICS_TASK_RESERVE_ELAPSE, time.time() - start_time)
-
 
     def drain_queue(self, queue):
         while True:

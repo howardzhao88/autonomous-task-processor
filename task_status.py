@@ -5,9 +5,8 @@ For user requested task, status transition : pending -> started -> success or fa
 import simplejson
 from django.utils import timezone
 from datetime import datetime
-from atp import atp_env
-from atp import tasklog_partition_manager
-from atp import constants as atp_constants
+import atp_env
+import constants as atp_constants
 from shared.simple_encoder import SimpleEncoder
 import logging
 import django.db.utils
@@ -97,10 +96,7 @@ def on_task_complete(atp_id, job_id, entity_id, elapse_ms, error_msg, result):
         status = atp_constants.ATP_TASK_STATUS_FAILED
     result_str = simplejson.dumps(result)
     tlog = TaskLog((0, job_id, entity_id, atp_id, timezone.now(), status, elapse_ms, error_msg, result_str))
-    tasklog_mgr = tasklog_partition_manager.TaskLogPartitionManager()
-    tasklog_table = tasklog_mgr.get_or_create_current_tasklog_table()
-    if tasklog_table:
-        tasklog_id = atp_env.mydb.insert_object(tasklog_table, tlog, ["id"])
+    tasklog_id = atp_env.mydb.insert_object("tasklog", tlog, ["id"])
     tstatus = TaskStatus((job_id, entity_id, atp_id, timezone.now(), status, tasklog_id))
     _upsert_task_status(tstatus)
 
@@ -130,20 +126,17 @@ def _list_task_status_by_query(clause, args):
 
 def list_task_logs(job_id, entity_id, start=0, page_size=50):
     """return all known execution history for a given task"""
-    where_clause = " job_id = %s and entity_id = %s order by id desc "
-    params = (job_id, entity_id)
-    result = _list_in_all_partitions(where_clause, params, start, page_size)
-    return result
+    sql = "select " + ", ".join(TaskLog.list_properties())
+    sql += " from tasklog where job_id = %s and entity_id = %s order by id desc limit %s, %s"
+    rows = atp_env.mydb.select(sql, (job_id, entity_id, start, page_size))
+    return [TaskLog(r) for r in rows]
 
 def get_task_log(tasklog_id):
     """Try to select from all tasklog tables for a give id"""
-    where_clause = " id = %s "
-    params = (tasklog_id,)
-    result = _list_in_all_partitions(where_clause, params, 0, 1)
-    if result:
-        return result[0]
-    else:
-        return None
+    sql = "select " + ", ".join(TaskLog.list_properties())
+    sql += " from tasklog where id = %s"
+    rows = atp_env.mydb.select(sql, (tasklog_id,))
+    return TaskLog(rows[0])
 
 def get_task_status_str(status):
     if (status == atp_constants.ATP_TASK_STATUS_PENDING):
@@ -152,27 +145,3 @@ def get_task_status_str(status):
         return "success"
     if (status == atp_constants.ATP_TASK_STATUS_FAILED):
         return "failed"
-
-def _list_in_all_partitions(where_clause, params, start=0, page_size=50):
-    start = max(0, int(start))
-    page_size = max(0, int(page_size))
-    result = []
-    partition_manager = tasklog_partition_manager.TaskLogPartitionManager()
-    for tasklog_table in partition_manager.list_existing_tables():
-        limit = page_size + start - len(result)
-        sql = "select " + ", ".join(TaskLog.list_properties())
-        sql += " from {0} where {1} limit {2}".format(tasklog_table, where_clause, limit)
-        try:
-            rows = atp_env.mydb.select(sql, params)
-        except django.db.utils.DatabaseError as ex:
-            if re.match("Table '.*%s' doesn't exist" % tasklog_table, ex.args[1]):
-                # would have stalled cache when old table is dropped
-                partition_manager.refresh_existing_tables()
-            else:
-                logging.error("Fail to get tasklog from %s. Error: %s" % (tasklog_table, ex))
-            break
-        for r in rows:
-            result.append(TaskLog(r))
-            if len(result) >= page_size + start:
-                break
-    return result[start:]

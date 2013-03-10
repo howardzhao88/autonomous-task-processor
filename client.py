@@ -15,17 +15,14 @@ from shared.dbhelper import DBHelper
 from django.conf import settings
 from django.core.cache import cache
 import constants as atp_constants
-from atp import constants, task_status, atp_env
-from atp import jobs
-from atp.models import Task
+import constants, task_status, atp_env
+import jobs
+from models import Task
 import copy
 import simplejson
 from shared.simple_encoder import SimpleEncoder
-from atp.constants import JOB_ETA_TYPE_PREVIOUS_ETA
+from constants import JOB_ETA_TYPE_PREVIOUS_ETA
 from datetime import timedelta
-import global_constants
-from contacts.constants import EMAIL_MESSAGES_SYNC_SERVICES
-from global_constants import APP_CONTACTS
 
 # command to shutdown a ATP
 SHUTDOWN_COMMAND = "shutdown"
@@ -45,12 +42,6 @@ def get_job_by_id(job_id):
     if job_id in jobs.job_list:
         return jobs.job_list[job_id]
     return None
-
-def enabled():
-    enabled = hasattr(settings, "ENABLE_ATP") and settings.ENABLE_ATP
-    if not enabled:
-        logging.warn("ATP is not enabled")
-    return enabled
 
 #public API
 class UnknownJobIdError(Exception):
@@ -81,8 +72,6 @@ def get_job_id_by_name_params(job_name, params):
     """ Called by application to retreive the job id based on job name and params in JSON form.
     @param job_name: the name of the job, e.g. contacts.tasks.sync_services. The job name must be in executor.py for a list of supported jobs.
     @param params: dict() of parameters used for the job, if any e.g., {"service": "Facebook"} """
-    if not enabled():
-        return
     job_id = None
     params_clone = copy.copy(params)
     #support None Param
@@ -127,8 +116,6 @@ def schedule_task(job_id, entity_id, eta):
     @param eta: the eta for the task
     returns the number of new task created (0 or 1).
     """
-    if not enabled():
-        return 0
     _check_job(job_id)
     if entity_id == None:
         entity_id = 0
@@ -149,7 +136,7 @@ def remove_task(job_id, entity_id):
     # allow unscheduling of entity_id = 0 for admin jobs
     _remove_tasks_in_tables(" job_id = %s and entity_id = %s ", (job_id, entity_id))
 
-def remove_profile_tasks_by_app(profile_id, app_name=APP_CONTACTS):
+def remove_profile_tasks_by_app(profile_id, app_name):
     """Remove  all tasks for a given profile id for a given app_name including scheduled and requested of all job_ids"""
     # we don't want to unschedule all admin tasks with entity_id = 0
     if profile_id <= 0:
@@ -197,8 +184,6 @@ def request_task(job_id, entity_id):
     @param job_id: the job_id, the job must be already configured.
     @param entity_id: the subject id for the target subject on which the job is performed. none, for job that's not subject specific.
     """
-    if not enabled():
-        return
     _check_job(job_id)
     key = atp_constants.ATP_REQUESTED_TASK_KEY_RAW % (job_id, entity_id)
     cache.set(key, {"status": "process_pending"})
@@ -237,8 +222,6 @@ def shutdown_pid(pid, process_host=None):
     @param process_host: the host name on which the ATP is running (as returned by gethostname().
         default to this current host
     """
-    if not enabled():
-        return
     if process_host == None:
         process_host = socket.gethostname()
     atp_ids = get_db().select_one_column("select id from atp where process_host = %s and pid = %s", (process_host, pid))
@@ -250,8 +233,6 @@ def shutdown(process_host=None):
     @param process_host: the host name on which the ATP is running (as returned by gethostname().
         default to this current host
     """
-    if not enabled():
-        return
     if process_host == None:
         process_host = socket.gethostname()
     atp_ids = get_db().select_one_column("select id from atp where process_host = %s", (process_host,))
@@ -261,26 +242,11 @@ def shutdown_all():
     """
     Shutdown all ATP running globally
     """
-    if not enabled():
-        return
     atp_ids = get_db().select_one_column("select id from atp")
     _issue_shutdown(atp_ids)
 
 def should_process_profile_id(profile_id):
-    if not enabled():
-        return False
-    # When ATP is enabled, process admin tasks
-    if profile_id == None or profile_id == 0:
-        return True
-    # check ATP_ENABLED_PROFILE_ID_RANGE
-    if hasattr(settings, "ATP_ENABLED_PROFILE_ID_START"):
-        if profile_id >= settings.ATP_ENABLED_PROFILE_ID_START:
-            return True
-    # check profile list
-    if hasattr(settings, "ATP_ENABLED_PROFILE_ID_LIST") and len(settings.ATP_ENABLED_PROFILE_ID_LIST) > 0:
-        return profile_id in settings.ATP_ENABLED_PROFILE_ID_LIST
-    # When ATP is enabled, and no settings.ATP_ENABLED_PROFILE_ID_LIST restrictions,
-    # we process all profiles.
+    # you can add logic here to enable task processing for a given profile_id
     return True
 
 def lookup_jobs(name):

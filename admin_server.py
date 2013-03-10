@@ -4,16 +4,13 @@ import urlparse
 import time
 import traceback
 import dateutil.parser
-from django.utils import simplejson
+import simplejson
 import urllib
 from django.conf import settings
-from atp import client, jobs
+import client, jobs
 import logging
 import threading
 from shared.simple_encoder import SimpleEncoder
-import simpleauth.models
-from django.core.exceptions import MultipleObjectsReturned
-from shared.contacts_shard_manager import ContactsShardManager
 
 HEALTH_CHECK_URL = "/admin"
 """This object is the json endpoint for reporting ATP stats and possibly other admin functions."""
@@ -43,7 +40,6 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             return
         params = self.clean_query_string(urlparse.parse_qs(url_parsed.query))
         results = self.execute_request(method, params)
-        ContactsShardManager().clear_thread_local()
         self.output_json(results)
 
     def output_json(self, results):
@@ -182,16 +178,6 @@ def schedule_task(*args, **kwargs):
         # entity_id takes precedence
         if "entity_id" in kwargs:
             entity_id = int(kwargs["entity_id"])
-        elif "linkedin_id" in kwargs:
-            linkedin_id = int(kwargs["linkedin_id"])
-            try:
-                ContactsShardManager().set_thread_local_member_id(linkedin_id)
-                profile = simpleauth.models.UserProfile.objects.get(linkedin_id=linkedin_id)
-            except simpleauth.models.UserProfile.DoesNotExist:
-                raise Exception("Profile with linkedin_id: %s doesn't exist" % linkedin_id)
-            except MultipleObjectsReturned:
-                raise Exception("Multiple UserProfile with linkedin_id: %s exists" % linkedin_id)
-            entity_id = profile.id
         else:
             raise Exception("Please provide either 'entity_id' or 'linkedin_id' to schedule task")
 

@@ -3,7 +3,7 @@
 from datetime import timedelta
 from django.test import TestCase
 from django.utils import unittest, timezone
-from atp import worker_proc, client
+import worker_proc, client
 import simplejson
 
 from atp.test.testing import with_atp

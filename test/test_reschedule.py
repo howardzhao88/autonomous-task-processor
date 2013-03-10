@@ -1,12 +1,11 @@
 from django.test import TestCase
 from nose.plugins.attrib import attr
 
-from atp.models import Job
-from atp.rescheduler import *
-from atp import constants as atp_const
+from models import Job, JobThrottle
+from rescheduler import *
+import constants as atp_const
 from datetime import datetime
-from atp.models import JobThrottle
-from atp.job_throttle_manager import JobThrottleManager
+from job_throttle_manager import JobThrottleManager
 
 class TestRescheduler(TestCase):
     multi_db = True

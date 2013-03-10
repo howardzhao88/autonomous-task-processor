@@ -4,9 +4,9 @@ import logging
 import threading
 import signal
 from django.conf import settings
-from atp import atp_env
-from atp import client
-from atp import autonomous_task_processor as atp_proc
+import atp_env
+import client
+import autonomous_task_processor as atp_proc
 from third_party import daemon
 
 class ATPThread(threading.Thread):
